@@ -13,7 +13,7 @@ import {
   createUIMessageStreamResponse,
   type ToolSet
 } from "ai";
-import { createCloudflareWorkersAI } from "workers-ai-provider";
+import { createWorkersAI } from "workers-ai-provider";
 import { processToolCalls, cleanupMessages } from "./utils";
 import { tools, executions } from "./tools";
 
@@ -32,10 +32,18 @@ export class Chat extends AIChatAgent<Env> {
     //   "https://path-to-mcp-server/sse"
     // );
 
-    // Collect all tools, including MCP tools
+    // Collect all tools, including MCP tools if available
+    let mcpTools = {};
+    try {
+      mcpTools = this.mcp.getAITools();
+    } catch (error) {
+      // MCP not initialized or not available - continue without MCP tools
+      console.debug("MCP tools not available:", error);
+    }
+
     const allTools = {
       ...tools,
-      ...this.mcp.getAITools()
+      ...mcpTools
     };
 
     const stream = createUIMessageStream({
@@ -52,32 +60,43 @@ export class Chat extends AIChatAgent<Env> {
           executions
         });
 
-        // Use Cloudflare Workers AI with Llama 3.3 (recommended for the assignment)
-        const cloudflare = createCloudflareWorkersAI({
+        // Use Cloudflare Workers AI with Llama 3.1 FP8 variant (better function calling support)
+        const workersai = createWorkersAI({
           binding: this.env.AI
         });
-        const model = cloudflare("@cf/meta/llama-3.3-70b-instruct");
+        const model = workersai("@cf/meta/llama-3.1-8b-instruct-fp8");
 
-        const result = streamText({
-          system: `You are a helpful assistant that can do various tasks... 
+        try {
+          const result = streamText({
+            system: `You are a helpful assistant. When users ask questions, use the available tools to get information, then provide a natural, conversational response based on the tool results.
 
 ${getSchedulePrompt({ date: new Date() })}
 
-If the user asks to schedule a task, use the schedule tool to schedule the task.
+Remember: Always use tools when needed - don't just describe what you would do. The tools will execute automatically and return results that you should then explain to the user in a friendly way.
 `,
 
-          messages: await convertToModelMessages(processedMessages),
-          model,
-          tools: allTools,
-          // Type boundary: streamText expects specific tool types, but base class uses ToolSet
-          // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
-          onFinish: onFinish as unknown as StreamTextOnFinishCallback<
-            typeof allTools
-          >,
-          stopWhen: stepCountIs(10)
-        });
+            messages: await convertToModelMessages(processedMessages),
+            model,
+            tools: allTools,
+            maxSteps: 5, // Allow multiple tool call rounds
+            // Type boundary: streamText expects specific tool types, but base class uses ToolSet
+            // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
+            onFinish: onFinish as unknown as StreamTextOnFinishCallback<
+              typeof allTools
+            >,
+            stopWhen: stepCountIs(10)
+          });
 
-        writer.merge(result.toUIMessageStream());
+          writer.merge(result.toUIMessageStream());
+        } catch (error) {
+          console.error("Error in streamText:", error);
+          // Write error message to stream
+          writer.writeData({
+            type: "error",
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
       }
     });
 

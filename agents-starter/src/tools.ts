@@ -10,13 +10,18 @@ import { getCurrentAgent } from "agents";
 import { scheduleSchema } from "agents/schedule";
 
 /**
- * Weather information tool that requires human confirmation
- * When invoked, this will present a confirmation dialog to the user
+ * Weather information tool that executes automatically
+ * Since it includes an execute function, it will run without user confirmation
  */
 const getWeatherInformation = tool({
-  description: "show the weather in a given city to the user",
-  inputSchema: z.object({ city: z.string() })
-  // Omitting execute function makes this tool require human confirmation
+  description: "Get the current weather information for a specific city. Use this tool whenever the user asks about weather, temperature, or climate conditions in any location.",
+  inputSchema: z.object({ 
+    city: z.string().describe("The name of the city to get weather for")
+  }),
+  execute: async ({ city }: { city: string }) => {
+    console.log(`Getting weather information for ${city}`);
+    return `The weather in ${city} is sunny`;
+  }
 });
 
 /**
@@ -25,11 +30,21 @@ const getWeatherInformation = tool({
  * This is suitable for low-risk operations that don't need oversight
  */
 const getLocalTime = tool({
-  description: "get the local time for a specified location",
-  inputSchema: z.object({ location: z.string() }),
+  description: "Get the current local time for a specified location or city. Use this tool whenever the user asks about time, what time it is, or the current time in a specific place.",
+  inputSchema: z.object({ 
+    location: z.string().describe("The name of the location or city to get the time for")
+  }),
   execute: async ({ location }) => {
     console.log(`Getting local time for ${location}`);
-    return "10am";
+    // Get current time and format it
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('en-US', { 
+      timeZone: 'America/Los_Angeles', // Default to Pacific time
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    return `The current time in ${location} is ${timeString}`;
   }
 });
 
@@ -124,10 +139,9 @@ export const tools = {
  * Implementation of confirmation-required tools
  * This object contains the actual logic for tools that need human approval
  * Each function here corresponds to a tool above that doesn't have an execute function
+ * 
+ * Note: getWeatherInformation now has an execute function, so it no longer needs to be here
  */
 export const executions = {
-  getWeatherInformation: async ({ city }: { city: string }) => {
-    console.log(`Getting weather information for ${city}`);
-    return `The weather in ${city} is sunny`;
-  }
+  // Add any tools that require confirmation here
 };
